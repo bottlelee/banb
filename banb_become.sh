@@ -3,7 +3,14 @@ banb_become() {
 
   for arg in "$@"; do
     case $arg in
-      --become=*) BECOME="${arg#*=}" ;;
+      --become=*)
+        BECOME="${arg#*=}"
+        # Validate boolean value
+        if [[ "$BECOME" != "true" && "$BECOME" != "false" ]]; then
+          echo "Error: --become must be 'true' or 'false'"
+          return 1
+        fi
+        ;;
       --help)
         cat <<EOF
 Simulated Ansible 'become' check in Bash
@@ -21,11 +28,18 @@ EOF
     esac
   done
 
+  # Check if become parameter was provided
+  if [[ -z "$BECOME" ]]; then
+    echo "Error: --become parameter is required"
+    echo "Usage: banb_become --become=true|false"
+    return 1
+  fi
+
   if [[ "$BECOME" == "true" ]]; then
     if [[ "$EUID" -ne 0 ]]; then
       echo "🚫 This operation requires root privileges."
-      echo "👉 Please run: sudo $0"
-      exit 1
+      echo "👉 Please run the command with sudo privileges"
+      return 1
     else
       echo "✅ Running as root (become=true)"
     fi
@@ -33,7 +47,7 @@ EOF
     if [[ "$EUID" -eq 0 ]]; then
       echo "🚫 This operation must be run as a non-root user."
       echo "👉 Please switch to a regular user and run: $0"
-      exit 1
+      return 1
     else
       echo "✅ Running as non-root (become=false)"
     fi

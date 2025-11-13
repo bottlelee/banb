@@ -36,16 +36,16 @@ _banb_info() {
 # Safe command execution with dry-run, become, and user support
 _banb_run() {
     local cmd="$*"
-    
+
     if $BANB_DRY_RUN; then
         echo "[DRY-RUN] $cmd"
         return 0
     fi
-    
+
     # Split command into array for safe execution
     local -a cmd_array
     IFS=' ' read -r -a cmd_array <<< "$cmd"
-    
+
     if $BANB_BECOME; then
         sudo "${cmd_array[@]}"
     else
@@ -60,11 +60,11 @@ _banb_parse_common_args() {
             --dry-run) BANB_DRY_RUN=true ;;
             --become) BANB_BECOME=true ;;
             --verbose) BANB_VERBOSE=true ;;
-            --help) 
+            --help)
                 _banb_show_help
                 return 0
                 ;;
-            *) 
+            *)
                 # Return unprocessed arguments
                 echo "$1"
                 ;;
@@ -89,7 +89,7 @@ EOF
 _banb_validate_bool() {
     local value="$1"
     local param_name="$2"
-    
+
     case "${value,,}" in
         ""|true|false) return 0 ;;
         *) _banb_error "$param_name must be true or false" 1 ;;
@@ -100,19 +100,19 @@ _banb_validate_bool() {
 _banb_validate_path() {
     local path="$1"
     local type="$2"
-    
+
     # Check for path traversal attempts
     if [[ "$path" =~ \.\./ || "$path" =~ /etc/passwd || "$path" =~ /etc/shadow ]]; then
         _banb_error "Invalid $type path '$path'" 1
         return 1
     fi
-    
+
     # Check for absolute paths in sensitive locations
-    if [[ "$path" =~ ^/(etc|boot|sys|proc|dev) ]]; then
+    if [[ "$path" =~ ^/(boot|sys|proc|dev) ]]; then
         _banb_error "$type path '$path' is in restricted system directory" 1
         return 1
     fi
-    
+
     return 0
 }
 
@@ -129,7 +129,7 @@ _banb_create_tempdir() {
 _banb_backup_file() {
     local file="$1"
     local backup_file="${file}.bak.$(date +%s)"
-    
+
     if [[ -e "$file" ]]; then
         _banb_run "cp -p '$file' '$backup_file'"
         _banb_info "Backup created: $backup_file"
@@ -153,14 +153,14 @@ _banb_check_sudo() {
 # Detect package manager with priority
 _banb_detect_package_manager() {
     local -a tools=("pacman" "apt" "dnf" "yum" "zypper" "apk")
-    
+
     for tool in "${tools[@]}"; do
         if _banb_command_exists "$tool"; then
             echo "$tool"
             return 0
         fi
     done
-    
+
     _banb_error "No supported package manager found" 2
     return 1
 }

@@ -1,16 +1,19 @@
 # @function banb_service
-# @description Ansible-like service management for systemd
-# @param --name=STRING Service name(s). For multiple, use commas (e.g., nginx,sshd).
-# @param --state=STRING One of: started, stopped, restarted, reloaded.
-# @param --enabled=true|false Enable/disable service at boot.
-# @param --daemon_reload=true|false Run 'systemctl daemon-reload' before applying state/enabled.
-# @param --dry-run Print commands without executing.
-# @param --become Execute commands via 'sudo' (system-wide).
-# @param --user=USERNAME Run service in user session (systemctl --user). If USERNAME is given, run as that user.
-# @param --verbose Print extra context (unit status hints).
+# @description Ansible-compatible service management module
+# @param name=STRING Service name(s). For multiple, use commas (e.g., nginx,sshd).
+# @param state=STRING One of: started, stopped, restarted, reloaded.
+# @param enabled=yes|no Enable/disable service at boot.
+# @param daemon_reload=yes|no Run 'systemctl daemon-reload' before applying state/enabled.
+# @param use=STRING Service manager to use (systemd, sysvinit, upstart). Default: systemd.
+# @param scope=STRING Service scope: system (default) or user.
+# @param user=STRING Username for user scope services.
+# @param sleep=INT Seconds to sleep between restart/stop and start operations.
+# @param pattern=STRING Pattern to search for in process list when using pattern mode.
+# @param arguments=STRING Additional arguments to pass to service manager.
+# @param runlevel=STRING Runlevel to target (sysvinit only).
 # @return 0 on success, 1 on error
 banb_service() {
-  local name="" state="" enabled="" daemon_reload="" user_target=""
+  local name="" state="" enabled="" daemon_reload="" use="systemd" scope="system" user="" sleep="" pattern="" arguments="" runlevel=""
   local -a actions
 
   # Reset global variables for this function call
@@ -18,85 +21,145 @@ banb_service() {
 
   # Print help and exit
   local _help="Usage:
-  banb_service --name=<svc[,svc2,...]> --state=<started|stopped|restarted|reloaded>
-               [--enabled=<true|false>] [--daemon_reload=<true|false>]
-               [--dry-run] [--become] [--user=<username>] [--verbose]
+  banb_service name=<svc[,svc2,...]> state=<started|stopped|restarted|reloaded>
+               [enabled=<yes|no>] [daemon_reload=<yes|no>] [use=<systemd|sysvinit|upstart>]
+               [sleep=<seconds>] [pattern=<pattern>] [arguments=<args>] [runlevel=<runlevel>]
 
 Description:
-  Manage systemd services in an Ansible-like way. Supports multiple services via comma-separated names.
-  Idempotent intent, with explicit systemctl calls mapped from 'state'. Optionally reloads systemd daemon.
+  Manage system services in an Ansible-compatible way. Supports multiple services via comma-separated names.
+  Idempotent intent, with explicit service manager calls mapped from 'state'.
 
 Parameters:
-  --name=STRING            Service name(s). For multiple, use commas (e.g., nginx,sshd).
-  --state=STRING           One of: started, stopped, restarted, reloaded.
-  --enabled=true|false     Enable/disable service at boot.
-  --daemon_reload=true|false  Run 'systemctl daemon-reload' before applying state/enabled.
-  --dry-run                Print commands without executing.
-  --become                 Execute commands via 'sudo' (system-wide).
-  --user=USERNAME          Run service in user session (systemctl --user). If USERNAME is given, run as that user.
-  --verbose                Print extra context (unit status hints).
+  name=STRING              Service name(s). For multiple, use commas (e.g., nginx,sshd).
+  state=STRING             One of: started, stopped, restarted, reloaded.
+  enabled=yes|no           Enable/disable service at boot.
+  daemon_reload=yes|no     Run 'systemctl daemon-reload' before applying state/enabled.
+  use=STRING               Service manager to use (systemd, sysvinit, upstart). Default: systemd.
+  sleep=INT                Seconds to sleep between restart/stop and start operations.
+  pattern=STRING           Pattern to search for in process list when using pattern mode.
+  arguments=STRING         Additional arguments to pass to service manager.
+  runlevel=STRING          Runlevel to target (sysvinit only).
   --help                   Show this message.
 
 Examples:
-  banb_service --name=nginx --state=started --enabled=true --become
-  banb_service --name=myapp --state=started --user=$(whoami)
-  banb_service --name=myapp --state=restarted --user=alice
-  banb_service --name=nginx --state=reloaded --daemon_reload=true --become
+  banb_service name=nginx state=started enabled=yes
+  banb_service name=nginx,sshd state=restarted daemon_reload=yes
+  banb_service name=apache2 state=stopped enabled=no
+  banb_service name=myapp state=started use=sysvinit
 "
 
   # Parse common args and set global variables
   _banb_parse_common_args "$@" || return $?
-  
-  # Parse module-specific args
+
+  # Parse module-specific args (Ansible-style key=value)
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help) printf "%s\n" "$_help"; return 0 ;;
-      --name=*) name="${1#*=}" ;;
-      --state=*) state="${1#*=}" ;;
-      --enabled=*) enabled="${1#*=}" ;;
-      --daemon_reload=*) daemon_reload="${1#*=}" ;;
-      --user=*) user_target="${1#*=}" ;;
-      *) _banb_error "Unknown option: $1" 1 ;;
+      name=*) name="${1#*=}" ;;
+      state=*) state="${1#*=}" ;;
+      enabled=*) enabled="${1#*=}" ;;
+      daemon_reload=*) daemon_reload="${1#*=}" ;;
+      use=*) use="${1#*=}" ;;
+      scope=*) scope="${1#*=}" ;;
+      user=*) user="${1#*=}" ;;
+      sleep=*) sleep="${1#*=}" ;;
+      pattern=*) pattern="${1#*=}" ;;
+      arguments=*) arguments="${1#*=}" ;;
+      runlevel=*) runlevel="${1#*=}" ;;
+      *) _banb_error "Unknown parameter: $1" 1 ;;
     esac
     shift
   done
 
-  # Validate prereqs
-  command -v systemctl >/dev/null 2>&1 || { printf "banb_service: systemctl not found.\n" >&2; return 2; }
-
-  # Check permissions for system-wide operations
-  if $BANB_BECOME && [[ "$EUID" -ne 0 ]]; then
-    if ! command -v sudo >/dev/null 2>&1; then
-      _banb_error "sudo not available for privilege escalation"
-      return 2
-    fi
-  fi
-
   # Validate required args
   if [[ -z "$name" || -z "$state" ]]; then
-    _banb_error "--name and --state are required"
+    _banb_error "name and state are required parameters"
     return 1
   fi
 
-  # Normalize booleans
-  case "${enabled,,}" in ""|true|false) ;; *) _banb_error "--enabled must be true or false"; return 1 ;; esac
-  case "${daemon_reload,,}" in ""|true|false) ;; *) _banb_error "--daemon_reload must be true or false"; return 1 ;; esac
+  # Validate parameter values
+  case "${state,,}" in
+    started|stopped|restarted|reloaded) ;;
+    *) _banb_error "state must be one of: started, stopped, restarted, reloaded"; return 1 ;;
+  esac
+
+  case "${enabled,,}" in ""|yes|no) ;; *) _banb_error "enabled must be yes or no"; return 1 ;; esac
+  case "${daemon_reload,,}" in ""|yes|no) ;; *) _banb_error "daemon_reload must be yes or no"; return 1 ;; esac
+  case "${use,,}" in systemd|sysvinit|upstart) ;; *) _banb_error "use must be one of: systemd, sysvinit, upstart"; return 1 ;; esac
+  case "${scope,,}" in ""|system|user) ;; *) _banb_error "scope must be system or user"; return 1 ;; esac
+
+  # Validate user scope requirements
+  if [[ "${scope,,}" == "user" && "${use,,}" != "systemd" ]]; then
+    _banb_error "user scope is only supported with systemd service manager"
+    return 1
+  fi
+
+  # Check service manager availability
+  case "${use,,}" in
+    systemd)
+      command -v systemctl >/dev/null 2>&1 || { _banb_error "systemctl not found"; return 2; }
+      ;;
+    sysvinit)
+      command -v service >/dev/null 2>&1 || { _banb_error "service command not found"; return 2; }
+      ;;
+    upstart)
+      command -v initctl >/dev/null 2>&1 || { _banb_error "initctl not found"; return 2; }
+      ;;
+  esac
 
   # Helper: run command with dry-run/become/user handling
-  _run_systemctl() {
-    local subcmd="$1" svc="$2"
+  _run_service_cmd() {
+    local cmd="$1" svc="$2"
     local -a cmd_array
-    
-    if $BANB_BECOME; then
-      cmd_array=(sudo systemctl "$subcmd" "$svc")
-    elif [[ -n "$user_target" ]]; then
-      if [[ "$user_target" == "$(whoami)" ]]; then
-        cmd_array=(systemctl --user "$subcmd" "$svc")
-      else
-        cmd_array=(sudo -u "$user_target" systemctl --user "$subcmd" "$svc")
-      fi
-    else
-      cmd_array=(systemctl "$subcmd" "$svc")
+
+    case "${use,,}" in
+      systemd)
+        # Handle user scope
+        if [[ "${scope,,}" == "user" ]]; then
+          if [[ -n "$user" ]]; then
+            # Run as specific user
+            if $BANB_BECOME; then
+              cmd_array=(sudo -u "$user" systemctl --user "$cmd" "$svc")
+            else
+              cmd_array=(systemctl --user "$cmd" "$svc")
+            fi
+          else
+            # Run as current user
+            if $BANB_BECOME; then
+              cmd_array=(sudo systemctl --user "$cmd" "$svc")
+            else
+              cmd_array=(systemctl --user "$cmd" "$svc")
+            fi
+          fi
+        else
+          # System scope
+          if $BANB_BECOME; then
+            cmd_array=(sudo systemctl "$cmd" "$svc")
+          else
+            cmd_array=(systemctl "$cmd" "$svc")
+          fi
+        fi
+        ;;
+      sysvinit)
+        if $BANB_BECOME; then
+          cmd_array=(sudo service "$svc" "$cmd")
+        else
+          cmd_array=(service "$svc" "$cmd")
+        fi
+        ;;
+      upstart)
+        if $BANB_BECOME; then
+          cmd_array=(sudo initctl "$cmd" "$svc")
+        else
+          cmd_array=(initctl "$cmd" "$svc")
+        fi
+        ;;
+    esac
+
+    # Add additional arguments if provided
+    if [[ -n "$arguments" ]]; then
+      IFS=' ' read -r -a extra_args <<< "$arguments"
+      cmd_array+=("${extra_args[@]}")
     fi
 
     if $BANB_DRY_RUN; then
@@ -110,9 +173,78 @@ Examples:
     return 0
   }
 
-  # Optional daemon-reload first
-  if [[ "${daemon_reload,,}" == "true" ]]; then
-    _run_systemctl daemon-reload "" || { _banb_error "daemon-reload failed"; return 3; }
+  # Helper: check service status
+  _check_service_status() {
+    local svc="$1"
+
+    case "${use,,}" in
+      systemd)
+        local status_cmd="systemctl"
+        if $BANB_BECOME; then
+          status_cmd="sudo systemctl"
+        fi
+
+        # Handle user scope
+        if [[ "${scope,,}" == "user" ]]; then
+          if [[ -n "$user" ]]; then
+            if $BANB_BECOME; then
+              status_cmd="sudo -u $user systemctl --user"
+            else
+              status_cmd="systemctl --user"
+            fi
+          else
+            if $BANB_BECOME; then
+              status_cmd="sudo systemctl --user"
+            else
+              status_cmd="systemctl --user"
+            fi
+          fi
+        fi
+
+        if $status_cmd is-active "$svc" >/dev/null 2>&1; then
+          echo "active"
+        else
+          echo "inactive"
+        fi
+        ;;
+      sysvinit)
+        # Simple check for sysvinit services
+        if pgrep -f "$svc" >/dev/null 2>&1; then
+          echo "active"
+        else
+          echo "inactive"
+        fi
+        ;;
+      upstart)
+        local status_cmd="initctl"
+        if $BANB_BECOME; then
+          status_cmd="sudo initctl"
+        fi
+
+        if $status_cmd status "$svc" 2>/dev/null | grep -q running; then
+          echo "active"
+        else
+          echo "inactive"
+        fi
+        ;;
+    esac
+  }
+
+  # Optional daemon-reload first (systemd only)
+  if [[ "${daemon_reload,,}" == "yes" && "${use,,}" == "systemd" ]]; then
+    if $BANB_BECOME; then
+      cmd_array=(sudo systemctl daemon-reload)
+    else
+      cmd_array=(systemctl daemon-reload)
+    fi
+
+    if $BANB_DRY_RUN; then
+      printf "[DRY-RUN] %s\n" "${cmd_array[*]}"
+      actions+=("${cmd_array[*]}")
+    else
+      "${cmd_array[@]}" || { _banb_error "daemon-reload failed"; return 3; }
+      actions+=("${cmd_array[*]}")
+    fi
   fi
 
   # Process each service
@@ -127,47 +259,125 @@ Examples:
       return 1
     fi
 
+    $BANB_VERBOSE && _banb_info "Managing '$svc' with state '$state' using $use..."
+
+    # Map state to service manager commands
     local subcmd=""
     case "$state" in
-      started)   subcmd="start" ;;
-      stopped)   subcmd="stop" ;;
-      restarted) subcmd="restart" ;;
-      reloaded)  subcmd="reload" ;;
-      *) _banb_error "invalid --state '$state'. See --help."; return 1 ;;
+      started)
+        case "${use,,}" in
+          systemd) subcmd="start" ;;
+          sysvinit) subcmd="start" ;;
+          upstart) subcmd="start" ;;
+        esac
+        ;;
+      stopped)
+        case "${use,,}" in
+          systemd) subcmd="stop" ;;
+          sysvinit) subcmd="stop" ;;
+          upstart) subcmd="stop" ;;
+        esac
+        ;;
+      restarted)
+        case "${use,,}" in
+          systemd) subcmd="restart" ;;
+          sysvinit) subcmd="restart" ;;
+          upstart) subcmd="restart" ;;
+        esac
+        ;;
+      reloaded)
+        case "${use,,}" in
+          systemd) subcmd="reload" ;;
+          sysvinit) subcmd="reload" ;;
+          upstart) subcmd="reload" ;;
+        esac
+        ;;
     esac
 
-    $BANB_VERBOSE && _banb_info "Managing '$svc' with state '$state'..."
-    if ! _run_systemctl "$subcmd" "$svc"; then
-      _banb_error "state '$state' failed for '$svc'"
-      # Check if service exists
-      if ! systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
-        _banb_warning "service '$svc' may not exist"
+    # Handle restart with sleep if specified
+    if [[ "$state" == "restarted" && -n "$sleep" ]]; then
+      if ! _run_service_cmd "stop" "$svc"; then
+        _banb_error "stop failed for '$svc' during restart"
+        return 3
       fi
-      return 3
+
+      $BANB_VERBOSE && _banb_info "Sleeping for $sleep seconds..."
+      if ! $BANB_DRY_RUN; then
+        sleep "$sleep"
+      fi
+
+      if ! _run_service_cmd "start" "$svc"; then
+        _banb_error "start failed for '$svc' during restart"
+        return 3
+      fi
+    else
+      # Normal operation
+      if ! _run_service_cmd "$subcmd" "$svc"; then
+        _banb_error "state '$state' failed for '$svc'"
+        return 3
+      fi
     fi
 
+    # Handle enabled/disabled state
     if [[ -n "$enabled" ]]; then
-      case "${enabled,,}" in
-        true)  _run_systemctl enable "$svc" || { _banb_error "enable failed for '$svc'"; return 3; } ;;
-        false) _run_systemctl disable "$svc" || { _banb_error "disable failed for '$svc'"; return 3; } ;;
+      case "${use,,}" in
+        systemd)
+          case "${enabled,,}" in
+            yes) _run_service_cmd "enable" "$svc" || { _banb_error "enable failed for '$svc'"; return 3; } ;;
+            no) _run_service_cmd "disable" "$svc" || { _banb_error "disable failed for '$svc'"; return 3; } ;;
+          esac
+          ;;
+        sysvinit)
+          if [[ -n "$runlevel" ]]; then
+            case "${enabled,,}" in
+              yes)
+                if $BANB_BECOME; then
+                  cmd_array=(sudo update-rc.d "$svc" enable "$runlevel")
+                else
+                  cmd_array=(update-rc.d "$svc" enable "$runlevel")
+                fi
+                ;;
+              no)
+                if $BANB_BECOME; then
+                  cmd_array=(sudo update-rc.d "$svc" disable)
+                else
+                  cmd_array=(update-rc.d "$svc" disable)
+                fi
+                ;;
+            esac
+
+            if $BANB_DRY_RUN; then
+              printf "[DRY-RUN] %s\n" "${cmd_array[*]}"
+              actions+=("${cmd_array[*]}")
+            else
+              "${cmd_array[@]}" || { _banb_error "${enabled,,} failed for '$svc'"; return 3; }
+              actions+=("${cmd_array[*]}")
+            fi
+          fi
+          ;;
       esac
     fi
 
+    # Verbose status output
     if $BANB_VERBOSE && ! $BANB_DRY_RUN; then
-      if systemctl is-enabled "$svc" >/dev/null 2>&1; then
-        _banb_info "  enabled: yes"
-      else
-        _banb_warning "  enabled: no/unknown"
-      fi
-      if systemctl is-active "$svc" >/dev/null 2>&1; then
-        _banb_info "  active:  yes"
-      else
-        _banb_warning "  active:  no"
+      local current_status
+      current_status=$(_check_service_status "$svc")
+      _banb_info "  current status: $current_status"
+
+      if [[ -n "$enabled" && "${use,,}" == "systemd" ]]; then
+        local enabled_status
+        if systemctl is-enabled "$svc" >/dev/null 2>&1; then
+          enabled_status="enabled"
+        else
+          enabled_status="disabled"
+        fi
+        _banb_info "  enabled status: $enabled_status"
       fi
     fi
   done
 
-  if $dry_run; then
+  # Dry-run summary
+  if $BANB_DRY_RUN; then
     printf "Planned actions (%d):\n" "${#actions[@]}"
     for a in "${actions[@]}"; do printf "  - %s\n" "$a"; done
   fi

@@ -1,9 +1,20 @@
-# banb_service: Ansible-like service management for systemd
-# Supports: --name, --state, --enabled, --daemon_reload, --dry-run, --become, --user, --verbose, --help
+# @function banb_service
+# @description Ansible-like service management for systemd
+# @param --name=STRING Service name(s). For multiple, use commas (e.g., nginx,sshd).
+# @param --state=STRING One of: started, stopped, restarted, reloaded.
+# @param --enabled=true|false Enable/disable service at boot.
+# @param --daemon_reload=true|false Run 'systemctl daemon-reload' before applying state/enabled.
+# @param --dry-run Print commands without executing.
+# @param --become Execute commands via 'sudo' (system-wide).
+# @param --user=USERNAME Run service in user session (systemctl --user). If USERNAME is given, run as that user.
+# @param --verbose Print extra context (unit status hints).
+# @return 0 on success, 1 on error
 banb_service() {
-  local name="" state="" enabled="" daemon_reload=""
-  local dry_run=false become=false verbose=false user_target=""
+  local name="" state="" enabled="" daemon_reload="" user_target=""
   local -a actions
+
+  # Reset global variables for this function call
+  _banb_reset_globals
 
   # Print help and exit
   local _help="Usage:
@@ -33,7 +44,10 @@ Examples:
   banb_service --name=nginx --state=reloaded --daemon_reload=true --become
 "
 
-  # Parse args
+  # Parse common args and set global variables
+  _banb_parse_common_args "$@" || return $?
+  
+  # Parse module-specific args
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help) printf "%s\n" "$_help"; return 0 ;;
@@ -41,11 +55,8 @@ Examples:
       --state=*) state="${1#*=}" ;;
       --enabled=*) enabled="${1#*=}" ;;
       --daemon_reload=*) daemon_reload="${1#*=}" ;;
-      --dry-run) dry_run=true ;;
-      --become) become=true ;;
       --user=*) user_target="${1#*=}" ;;
-      --verbose) verbose=true ;;
-      *) printf "banb_service: unknown option: %s\nTry --help for usage.\n" "$1" >&2; return 1 ;;
+      *) _banb_error "Unknown option: $1" 1 ;;
     esac
     shift
   done
@@ -54,53 +65,54 @@ Examples:
   command -v systemctl >/dev/null 2>&1 || { printf "banb_service: systemctl not found.\n" >&2; return 2; }
 
   # Check permissions for system-wide operations
-  if $become && [[ "$EUID" -ne 0 ]]; then
+  if $BANB_BECOME && [[ "$EUID" -ne 0 ]]; then
     if ! command -v sudo >/dev/null 2>&1; then
-      printf "banb_service: sudo not available for privilege escalation.\n" >&2
+      _banb_error "sudo not available for privilege escalation"
       return 2
     fi
   fi
 
   # Validate required args
-  [[ -z "$name" || -z "$state" ]] && { printf "banb_service: --name and --state are required.\n" >&2; return 1; }
+  if [[ -z "$name" || -z "$state" ]]; then
+    _banb_error "--name and --state are required"
+    return 1
+  fi
 
   # Normalize booleans
-  case "${enabled,,}" in ""|true|false) ;; *) printf "banb_service: --enabled must be true or false.\n" >&2; return 1 ;; esac
-  case "${daemon_reload,,}" in ""|true|false) ;; *) printf "banb_service: --daemon_reload must be true or false.\n" >&2; return 1 ;; esac
+  case "${enabled,,}" in ""|true|false) ;; *) _banb_error "--enabled must be true or false"; return 1 ;; esac
+  case "${daemon_reload,,}" in ""|true|false) ;; *) _banb_error "--daemon_reload must be true or false"; return 1 ;; esac
 
   # Helper: run command with dry-run/become/user handling
   _run_systemctl() {
     local subcmd="$1" svc="$2"
-    local cmd=""
-    if $become; then
-      cmd="sudo systemctl $subcmd $svc"
+    local -a cmd_array
+    
+    if $BANB_BECOME; then
+      cmd_array=(sudo systemctl "$subcmd" "$svc")
     elif [[ -n "$user_target" ]]; then
       if [[ "$user_target" == "$(whoami)" ]]; then
-        cmd="systemctl --user $subcmd $svc"
+        cmd_array=(systemctl --user "$subcmd" "$svc")
       else
-        cmd="sudo -u $user_target systemctl --user $subcmd $svc"
+        cmd_array=(sudo -u "$user_target" systemctl --user "$subcmd" "$svc")
       fi
     else
-      cmd="systemctl $subcmd $svc"
+      cmd_array=(systemctl "$subcmd" "$svc")
     fi
 
-    if $dry_run; then
-      printf "[DRY-RUN] %s\n" "$cmd"
-      actions+=("$cmd")
+    if $BANB_DRY_RUN; then
+      printf "[DRY-RUN] %s\n" "${cmd_array[*]}"
+      actions+=("${cmd_array[*]}")
       return 0
     fi
 
-    # Split command into array for safe execution
-    local -a cmd_array
-    IFS=' ' read -r -a cmd_array <<< "$cmd"
     "${cmd_array[@]}" || return 1
-    actions+=("$cmd")
+    actions+=("${cmd_array[*]}")
     return 0
   }
 
   # Optional daemon-reload first
   if [[ "${daemon_reload,,}" == "true" ]]; then
-    _run_systemctl daemon-reload "" || { printf "banb_service: daemon-reload failed.\n" >&2; return 3; }
+    _run_systemctl daemon-reload "" || { _banb_error "daemon-reload failed"; return 3; }
   fi
 
   # Process each service
@@ -111,7 +123,7 @@ Examples:
 
     # Validate service name format
     if [[ ! "$svc" =~ ^[a-zA-Z0-9@_.-]+$ ]] || [[ -z "$svc" ]]; then
-      printf "banb_service: invalid service name '%s'.\n" "$svc" >&2
+      _banb_error "invalid service name '$svc'"
       return 1
     fi
 
@@ -121,36 +133,36 @@ Examples:
       stopped)   subcmd="stop" ;;
       restarted) subcmd="restart" ;;
       reloaded)  subcmd="reload" ;;
-      *) printf "banb_service: invalid --state '%s'. See --help.\n" "$state" >&2; return 1 ;;
+      *) _banb_error "invalid --state '$state'. See --help."; return 1 ;;
     esac
 
-    $verbose && printf "Managing '%s' with state '%s'...\n" "$svc" "$state"
+    $BANB_VERBOSE && _banb_info "Managing '$svc' with state '$state'..."
     if ! _run_systemctl "$subcmd" "$svc"; then
-      printf "banb_service: state '%s' failed for '%s'.\n" "$state" "$svc" >&2
+      _banb_error "state '$state' failed for '$svc'"
       # Check if service exists
       if ! systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
-        printf "  Hint: service '%s' may not exist.\n" "$svc" >&2
-    fi
+        _banb_warning "service '$svc' may not exist"
+      fi
       return 3
     fi
 
     if [[ -n "$enabled" ]]; then
       case "${enabled,,}" in
-        true)  _run_systemctl enable "$svc" || { printf "banb_service: enable failed for '%s'.\n" "$svc" >&2; return 3; } ;;
-        false) _run_systemctl disable "$svc" || { printf "banb_service: disable failed for '%s'.\n" "$svc" >&2; return 3; } ;;
+        true)  _run_systemctl enable "$svc" || { _banb_error "enable failed for '$svc'"; return 3; } ;;
+        false) _run_systemctl disable "$svc" || { _banb_error "disable failed for '$svc'"; return 3; } ;;
       esac
     fi
 
-    if $verbose && ! $dry_run; then
+    if $BANB_VERBOSE && ! $BANB_DRY_RUN; then
       if systemctl is-enabled "$svc" >/dev/null 2>&1; then
-        printf "  enabled: yes\n"
+        _banb_info "  enabled: yes"
       else
-        printf "  enabled: no/unknown\n"
+        _banb_warning "  enabled: no/unknown"
       fi
       if systemctl is-active "$svc" >/dev/null 2>&1; then
-        printf "  active:  yes\n"
+        _banb_info "  active:  yes"
       else
-        printf "  active:  no\n"
+        _banb_warning "  active:  no"
       fi
     fi
   done

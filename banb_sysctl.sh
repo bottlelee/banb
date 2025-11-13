@@ -1,7 +1,7 @@
 banb_sysctl() {
   local DEST="/etc/sysctl.conf"
-  local SYSCTL_DICT="" NAME="" VALUE=""
-  local BACKUP=false DRY_RUN=false BECOME=false RELOAD=true
+  local SYSCTL_DICT="" NAME="" VALUE="" STATE=""
+  local BACKUP=false RELOAD=true
 
   local _help="Usage:
   banb_sysctl --name=KEY --value=VAL [--state=present|absent] [--reload=true|false]
@@ -16,7 +16,10 @@ Examples:
   banb_sysctl --sysctl-dict=\"vm.swappiness=1 net.core.somaxconn=65535\" --dest=/etc/sysctl.d/99-elk.conf --backup=true --reload=true
 "
 
-  # Parse args
+  # Parse common args and set global variables
+  _banb_parse_common_args "$@" || return $?
+  
+  # Parse module-specific args
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --help) echo "$_help"; return 0 ;;
@@ -27,29 +30,26 @@ Examples:
       --reload=*) RELOAD="${1#*=}" ;;
       --dest=*) DEST="${1#*=}" ;;
       --backup=*) BACKUP="${1#*=}" ;;
-      --dry-run) DRY_RUN=true ;;
-      --become) BECOME=true ;;
-      *) echo "Unknown option: $1"; return 1 ;;
+      *) _banb_error "Unknown option: $1" 1 ;;
     esac
     shift
   done
 
-  # Runner
-  _run() {
-    local cmd="$*"
-    if $DRY_RUN; then
-      echo "[DRY-RUN] $cmd"
-    elif $BECOME; then
-      sudo bash -c "$cmd"
-    else
-      bash -c "$cmd"
-    fi
-  }
+  # Validate path for security
+  _banb_validate_path "$DEST" "destination" || return $?
 
   # Tempdir
   local tmpdir tmpfile
-  tmpdir=$(mktemp -d)
+  tmpdir=$(_banb_create_tempdir "banb_sysctl")
   tmpfile="$tmpdir/$(basename "$DEST")"
+  
+  # Check if source file is readable
+  if [[ -e "$DEST" && ! -r "$DEST" ]]; then
+    _banb_error "Cannot read file '$DEST'"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  
   cp "$DEST" "$tmpfile" 2>/dev/null || touch "$tmpfile"
 
   # Apply k/v
@@ -68,32 +68,31 @@ Examples:
 
   # Compare
   if cmp -s "$tmpfile" "$DEST"; then
-    echo "⚖️ No changes needed — $(basename "$DEST") identical."
+    _banb_info "No changes needed — $(basename "$DEST") identical."
     rm -rf "$tmpdir"
     return 0
   fi
 
   # Validate tempfile
   if ! sysctl -p "$tmpfile" >/dev/null 2>&1; then
-    echo "❌ Validation failed for $(basename "$tmpfile") — aborting."
+    _banb_error "Validation failed for $(basename "$tmpfile") — aborting."
     rm -rf "$tmpdir"
     return 1
   fi
 
   # Backup
   if [[ "$BACKUP" == "true" && -e "$DEST" ]]; then
-    _run "cp -p '$DEST' '${DEST}.bak.$(date +%s)'"
-    echo "🔁 Backup created: ${DEST}.bak.$(date +%s)"
+    _banb_backup_file "$DEST"
   fi
 
   # Copy tempfile to dest
-  _run "cp '$tmpfile' '$DEST'"
-  echo "📄 Updated $(basename "$DEST")"
+  _banb_run "cp '$tmpfile' '$DEST'"
+  _banb_success "Updated $(basename "$DEST")"
 
   # Reload
   if [[ "${RELOAD,,}" == "true" ]]; then
-    _run "sysctl -p '$DEST'"
-    echo "🔄 Reloaded sysctl from $(basename "$DEST")"
+    _banb_run "sysctl -p '$DEST'"
+    _banb_success "Reloaded sysctl from $(basename "$DEST")"
   fi
 
   rm -rf "$tmpdir"

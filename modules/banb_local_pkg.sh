@@ -1,40 +1,40 @@
 # @function banb_local_pkg
 # @description Simulated air-gapped package installer
-# @param --pkgs-path=DIR Directory containing local packages (default: pkgs)
-# @param --pkgs-name=LIST Space-separated list of packages to download if missing
-# @param --download-only=true Download packages only (requires banb_package)
+# @param pkgs_path=DIR Directory containing local packages (default: pkgs)
+# @param pkgs_name=LIST Space-separated list of packages to download if missing
+# @param download_only=yes Download packages only (requires banb_package)
 # @return 0 on success, 1 on error
 banb_local_pkg() {
   local PKGS_PATH="pkgs"
   local PKGS_NAME=""
   local PKG_TOOL=""
-  local DOWNLOAD_ONLY=false
+  local DOWNLOAD_ONLY=no
 
   # Parse common args and set global variables
   _banb_parse_common_args "$@" || return $?
 
-  # Parse module-specific args
+  # Parse module-specific args (Ansible-style key=value)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --pkgs-path=*) PKGS_PATH="${1#*=}" ;;
-      --pkgs-name=*) PKGS_NAME="${1#*=}" ;;
-      --download-only=*|--download_only=*)
+      pkgs_path=*) PKGS_PATH="${1#*=}" ;;
+      pkgs_name=*) PKGS_NAME="${1#*=}" ;;
+      download_only=*)
         case "${1#*=}" in
-          true|false) DOWNLOAD_ONLY="${1#*=}" ;;
-          *) _banb_error "--download-only must be true or false"; return 1 ;;
+          yes|no) DOWNLOAD_ONLY="${1#*=}" ;;
+          *) _banb_error "download_only must be yes or no"; return 1 ;;
         esac
         ;;
-      --help)
+      help)
         cat <<EOF
 Simulated air-gapped package installer
 
 Usage:
-  banb_local_pkg [--pkgs-path=DIR] [--pkgs-name="pkg1 pkg2 ..."] [--download_only=true]
+  banb_local_pkg [pkgs_path=DIR] [pkgs_name="pkg1 pkg2 ..."] [download_only=yes]
 
 Options:
-  --pkgs-path=DIR       Directory containing local packages (default: pkgs)
-  --pkgs-name=LIST      Space-separated list of packages to download if missing
-  --download_only=true  Download packages only (requires banb_package)
+  pkgs_path=DIR       Directory containing local packages (default: pkgs)
+  pkgs_name=LIST      Space-separated list of packages to download if missing
+  download_only=yes   Download packages only (requires banb_package)
 EOF
         return 0
         ;;
@@ -97,10 +97,10 @@ EOF
   esac
 
   # If no packages found or install failed, fallback to download
-  if [[ -n "$PKGS_NAME" && "$DOWNLOAD_ONLY" == "true" ]]; then
+  if [[ -n "$PKGS_NAME" && "$DOWNLOAD_ONLY" == "yes" ]]; then
     _banb_info "Attempting to download missing packages: $PKGS_NAME"
     for pkg in $PKGS_NAME; do
-      banb_package --name="$pkg" --download_only=true --download_dir="$PKGS_PATH"
+      banb_package name="$pkg" download_only=true download_dir="$PKGS_PATH"
     done
     _banb_info "Download completed. You can now transfer these to the air-gapped system."
   fi

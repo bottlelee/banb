@@ -1,12 +1,12 @@
 # @function banb_package
 # @description Simulated Ansible 'package' module in Bash function
-# @param --name=PKG Package name (required)
-# @param --state=present|absent|latest Package state (default: present)
-# @param --use=TOOL Specific package manager to use
-# @param --update_cache=true Update package cache
-# @param --allow_downgrade=true Allow package downgrade
-# @param --download_only=true Download packages only
-# @param --download_dir=PATH Download directory (default: pkgs)
+# @param name=PKG Package name (required)
+# @param state=present|absent|latest Package state (default: present)
+# @param use=TOOL Specific package manager to use
+# @param update_cache=true Update package cache
+# @param allow_downgrade=true Allow package downgrade
+# @param download_only=true Download packages only
+# @param download_dir=PATH Download directory (default: pkgs)
 # @return 0 on success, 1 on error
 banb_package() {
   local PKG_NAME=""
@@ -23,38 +23,38 @@ banb_package() {
   # Parse module-specific args
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --name=*) PKG_NAME="${1#*=}" ;;
-      --state=*) PKG_STATE="${1#*=}" ;;
-      --use=*) PKG_USE="${1#*=}" ;;
-      --update_cache=*)
+      name=*) PKG_NAME="${1#*=}" ;;
+      state=*) PKG_STATE="${1#*=}" ;;
+      use=*) PKG_USE="${1#*=}" ;;
+      update_cache=*)
         case "${1#*=}" in
           true|false) UPDATE_CACHE="${1#*=}" ;;
-          *) _banb_error "--update_cache must be true or false"; return 1 ;;
+          *) _banb_error "update_cache must be true or false"; return 1 ;;
         esac
         ;;
-      --allow_downgrade=*)
+      allow_downgrade=*)
         case "${1#*=}" in
           true|false) ALLOW_DOWNGRADE="${1#*=}" ;;
-          *) _banb_error "--allow_downgrade must be true or false"; return 1 ;;
+          *) _banb_error "allow_downgrade must be true or false"; return 1 ;;
         esac
         ;;
-      --download_only=*)
+      download_only=*)
         case "${1#*=}" in
           true|false) DOWNLOAD_ONLY="${1#*=}" ;;
-          *) _banb_error "--download_only must be true or false"; return 1 ;;
+          *) _banb_error "download_only must be true or false"; return 1 ;;
         esac
         ;;
-      --download_dir=*) DOWNLOAD_DIR="${1#*=}" ;;
-      --help)
+      download_dir=*) DOWNLOAD_DIR="${1#*=}" ;;
+      help)
         cat <<EOF
 Simulated Ansible 'package' module in Bash function
 
 Usage:
-  banb_package --name=PKG [--state=present|absent|latest]
-                  [--use=TOOL] [--update_cache=true]
-                  [--allow_downgrade=true]
-                  [--download_only=true]
-                  [--download_dir=PATH]
+  banb_package name=PKG [state=present|absent|latest]
+                  [use=TOOL] [update_cache=true]
+                  [allow_downgrade=true]
+                  [download_only=true]
+                  [download_dir=PATH]
 
 EOF
         return 0
@@ -66,13 +66,13 @@ EOF
 
   # Validate required parameters
   if [[ -z "$PKG_NAME" ]]; then
-    _banb_error "--name is required"
+    _banb_error "name is required"
     return 1
   fi
 
   # Create download directory if specified
   if [[ -n "$DOWNLOAD_DIR" ]]; then
-    mkdir -p "$DOWNLOAD_DIR" || { _banb_error "Failed to create download directory: $DOWNLOAD_DIR"; return 1; }
+    banb_file path="$DOWNLOAD_DIR" state=directory owner="${OWNER:-}" group="${GROUP:-}" mode="${MODE:-0755}" || return 1
   fi
 
   # Use common package manager detection function

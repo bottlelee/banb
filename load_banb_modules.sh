@@ -10,14 +10,14 @@ if [[ ! -d "$BANB_LIB_DIR" ]]; then
 fi
 
 # Load common functions first
-if [[ -f "$BANB_LIB_DIR/banb_common.sh" ]]; then
-  source "$BANB_LIB_DIR/banb_common.sh"
+if [[ -f "$BANB_LIB_DIR/modules/banb_common.sh" ]]; then
+  source "$BANB_LIB_DIR/modules/banb_common.sh"
   echo "✅ Loaded: banb_common.sh"
 fi
 
 # Load other modules
-for file in "$BANB_LIB_DIR"/banb_*.sh; do
+for file in "$BANB_LIB_DIR/modules"/banb_*.sh; do
   # Skip common file as it's already loaded
-  [[ "$file" == "$BANB_LIB_DIR/banb_common.sh" ]] && continue
+  [[ "$file" == "$BANB_LIB_DIR/modules/banb_common.sh" ]] && continue
   [[ -f "$file" ]] && source "$file" && echo "✅ Loaded: $(basename "$file")"
 done

@@ -23,7 +23,8 @@ banb_service() {
   local _help="Usage:
   banb_service name=<svc[,svc2,...]> state=<started|stopped|restarted|reloaded>
                [enabled=<yes|no>] [daemon_reload=<yes|no>] [use=<systemd|sysvinit|upstart>]
-               [sleep=<seconds>] [pattern=<pattern>] [arguments=<args>] [runlevel=<runlevel>]
+               [scope=<system|user>] [user=<username>] [sleep=<seconds>] [pattern=<pattern>]
+               [arguments=<args>] [runlevel=<runlevel>]
 
 Description:
   Manage system services in an Ansible-compatible way. Supports multiple services via comma-separated names.
@@ -35,6 +36,8 @@ Parameters:
   enabled=yes|no           Enable/disable service at boot.
   daemon_reload=yes|no     Run 'systemctl daemon-reload' before applying state/enabled.
   use=STRING               Service manager to use (systemd, sysvinit, upstart). Default: systemd.
+  scope=STRING             Service scope: system (default) or user.
+  user=STRING              Username for user scope services.
   sleep=INT                Seconds to sleep between restart/stop and start operations.
   pattern=STRING           Pattern to search for in process list when using pattern mode.
   arguments=STRING         Additional arguments to pass to service manager.
@@ -46,6 +49,8 @@ Examples:
   banb_service name=nginx,sshd state=restarted daemon_reload=yes
   banb_service name=apache2 state=stopped enabled=no
   banb_service name=myapp state=started use=sysvinit
+  banb_service name=podman state=started scope=user
+  banb_service name=myapp state=started scope=user user=vagrant
 "
 
   # Parse common args and set global variables
@@ -54,7 +59,7 @@ Examples:
   # Parse module-specific args (Ansible-style key=value)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --help) printf "%s\n" "$_help"; return 0 ;;
+      help) printf "%s\n" "$_help"; return 0 ;;
       name=*) name="${1#*=}" ;;
       state=*) state="${1#*=}" ;;
       enabled=*) enabled="${1#*=}" ;;
@@ -232,10 +237,28 @@ Examples:
 
   # Optional daemon-reload first (systemd only)
   if [[ "${daemon_reload,,}" == "yes" && "${use,,}" == "systemd" ]]; then
-    if $BANB_BECOME; then
-      cmd_array=(sudo systemctl daemon-reload)
+    if [[ "${scope,,}" == "user" ]]; then
+      # User scope daemon-reload
+      if [[ -n "$user" ]]; then
+        if $BANB_BECOME; then
+          cmd_array=(sudo -u "$user" systemctl --user daemon-reload)
+        else
+          cmd_array=(systemctl --user daemon-reload)
+        fi
+      else
+        if $BANB_BECOME; then
+          cmd_array=(sudo systemctl --user daemon-reload)
+        else
+          cmd_array=(systemctl --user daemon-reload)
+        fi
+      fi
     else
-      cmd_array=(systemctl daemon-reload)
+      # System scope daemon-reload
+      if $BANB_BECOME; then
+        cmd_array=(sudo systemctl daemon-reload)
+      else
+        cmd_array=(systemctl daemon-reload)
+      fi
     fi
 
     if $BANB_DRY_RUN; then

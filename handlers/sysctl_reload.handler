@@ -1,0 +1,71 @@
+#!/bin/bash
+# @function sysctl_reload
+# @description Reload system kernel parameters
+# @param apply_changes=yes|no Apply sysctl changes (default: yes)
+# @param restart_services=yes|no Restart affected services (default: yes)
+# @return 0 on success, 1 on error
+
+set -euo pipefail
+
+# Load banb functions
+source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../../banb/load_banb_modules.sh"
+
+# Default values
+APPLY_CHANGES="yes"
+RESTART_SERVICES="yes"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        apply_changes=*) APPLY_CHANGES="${1#*=}" ;;
+        restart_services=*) RESTART_SERVICES="${1#*=}" ;;
+        help)
+            cat <<EOF
+Sysctl Reload Handler
+
+Usage: sysctl_reload [apply_changes=yes|no] [restart_services=yes|no]
+
+Description:
+  Reload system kernel parameters and optionally restart affected services.
+  This handler should be triggered after sysctl configuration changes.
+
+Parameters:
+  apply_changes=yes|no      Apply sysctl changes (default: yes)
+  restart_services=yes|no   Restart affected services (default: yes)
+
+Examples:
+  sysctl_reload apply_changes=yes
+  sysctl_reload restart_services=no
+EOF
+            return 0
+            ;;
+        *) echo "❌ Unknown parameter: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+echo "🔧 Sysctl Reload Handler: Starting..."
+
+# Apply sysctl changes
+if [[ "$APPLY_CHANGES" == "yes" ]]; then
+    echo "📋 Applying kernel parameter changes..."
+    sysctl --system
+    echo "✅ Kernel parameters applied successfully"
+fi
+
+# Restart affected services
+if [[ "$RESTART_SERVICES" == "yes" ]]; then
+    echo "🔄 Restarting affected services..."
+
+    # Restart services that might be affected by sysctl changes
+    declare -a services=("systemd-sysctl" "systemd-journald" "systemd-udevd")
+
+    for service in "${services[@]}"; do
+        if systemctl is-active "$service" >/dev/null 2>&1; then
+            banb_service name="$service" state=restarted scope=system use=systemd
+            echo "✅ Service restarted: $service"
+        fi
+    done
+fi
+
+echo "✅ Sysctl Reload Handler: Completed successfully"

@@ -38,36 +38,36 @@ banb_ini_file() {
   # Parse common args and set global variables
   _banb_parse_common_args "$@" || return $?
 
-  # Parse module-specific args
+  # Parse module-specific args (Ansible-style key=value)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --path=*) PATH_TO_FILE="${1#*=}" ;;
-      --section=*) SECTION="${1#*=}" ;;
-      --option=*) OPTION="${1#*=}" ;;
-      --value=*) VALUE="${1#*=}" ;;
-      --state=*) STATE="${1#*=}" ;;
-      --backup=*)
+      path=*) PATH_TO_FILE="${1#*=}" ;;
+      section=*) SECTION="${1#*=}" ;;
+      option=*) OPTION="${1#*=}" ;;
+      value=*) VALUE="${1#*=}" ;;
+      state=*) STATE="${1#*=}" ;;
+      backup=*)
         case "${1#*=}" in
-          true|false) BACKUP="${1#*=}" ;;
-          *) _banb_error "--backup must be true or false"; return 1 ;;
+          yes|no) BACKUP="${1#*=}" ;;
+          *) _banb_error "backup must be yes or no"; return 1 ;;
         esac
         ;;
-      --mode=*) MODE="${1#*=}" ;;
-      --owner=*) OWNER="${1#*=}" ;;
-      --group=*) GROUP="${1#*=}" ;;
-      --no_extra_spaces=*)
+      mode=*) MODE="${1#*=}" ;;
+      owner=*) OWNER="${1#*=}" ;;
+      group=*) GROUP="${1#*=}" ;;
+      no_extra_spaces=*)
         case "${1#*=}" in
-          true|false) NO_EXTRA_SPACES="${1#*=}" ;;
-          *) _banb_error "--no_extra_spaces must be true or false"; return 1 ;;
+          yes|no) NO_EXTRA_SPACES="${1#*=}" ;;
+          *) _banb_error "no_extra_spaces must be yes or no"; return 1 ;;
         esac
         ;;
-      --create=*)
+      create=*)
         case "${1#*=}" in
-          true|false) CREATE="${1#*=}" ;;
-          *) _banb_error "--create must be true or false"; return 1 ;;
+          yes|no) CREATE="${1#*=}" ;;
+          *) _banb_error "create must be yes or no"; return 1 ;;
         esac
         ;;
-      --follow=*)
+      follow=*)
         case "${1#*=}" in
           true|false) FOLLOW="${1#*=}" ;;
           *) _banb_error "--follow must be true or false"; return 1 ;;
@@ -157,7 +157,7 @@ EOF
         _banb_error "Cannot create file: directory '$parent_dir' is not writable"
         return 1
       fi
-      mkdir -p "$parent_dir" || { _banb_error "Failed to create directory: $parent_dir"; return 1; }
+      banb_file path="$parent_dir" state=directory owner="${OWNER:-}" group="${GROUP:-}" mode="${MODE:-0755}" || return 1
       touch "$real_path" || { _banb_error "Failed to create file: $real_path"; return 1; }
       _banb_info "Created file: $real_path"
     fi

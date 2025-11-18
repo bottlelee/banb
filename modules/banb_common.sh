@@ -98,8 +98,14 @@ _banb_validate_bool() {
 
 # Validate file path for security
 _banb_validate_path() {
-    local path="$1"
-    local type="$2"
+    local path="${1:-}"
+    local type="${2:-file}"
+
+    # Check for empty path
+    if [[ -z "$path" ]]; then
+        _banb_error "Path cannot be empty" 1
+        return 1
+    fi
 
     # Check for path traversal attempts
     if [[ "$path" =~ \.\./ || "$path" =~ /etc/passwd || "$path" =~ /etc/shadow ]]; then
@@ -170,6 +176,58 @@ _banb_reset_globals() {
     BANB_DRY_RUN=false
     BANB_BECOME=false
     BANB_VERBOSE=false
+    BANB_FORCE_YES=false
+}
+
+# Confirm dangerous operations unless --forceyes is set
+_banb_confirm() {
+    local action="$1"
+    
+    if $BANB_FORCE_YES; then
+        return 0
+    fi
+    
+    read -p "⚠️ Confirm $action? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        _banb_error "Operation cancelled by user" 1
+        return 1
+    fi
+    return 0
+}
+
+# Parse common arguments and set global variables (updated with --forceyes)
+_banb_parse_common_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) BANB_DRY_RUN=true ;;
+            --become) BANB_BECOME=true ;;
+            --verbose) BANB_VERBOSE=true ;;
+            --forceyes) BANB_FORCE_YES=true ;;
+            --help)
+                _banb_show_help
+                return 0
+                ;;
+            *)
+                # Return unprocessed arguments
+                echo "$1"
+                ;;
+        esac
+        shift
+    done
+}
+
+# Show common help message (updated with --forceyes)
+_banb_show_help() {
+    cat <<EOF
+Common Options:
+  --dry-run     Print commands without executing
+  --become      Execute commands with sudo
+  --verbose     Print extra context and information
+  --forceyes    Skip confirmation for dangerous operations
+  --help        Show this help message
+
+EOF
 }
 
 # Load common functions

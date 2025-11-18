@@ -1,0 +1,94 @@
+#!/bin/bash
+# @function podman_restart
+# @description Restart Podman service and containers
+# @param scope=system|user Service scope (default: system)
+# @param user=USER Username for user scope
+# @param restart_containers=yes|no Restart running containers (default: yes)
+# @return 0 on success, 1 on error
+
+set -euo pipefail
+
+# Load banb functions
+source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../../banb/load_banb_modules.sh"
+
+# Default values
+SCOPE="system"
+USER=""
+RESTART_CONTAINERS="yes"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        scope=*) SCOPE="${1#*=}" ;;
+        user=*) USER="${1#*=}" ;;
+        restart_containers=*) RESTART_CONTAINERS="${1#*=}" ;;
+        help)
+            cat <<EOF
+Podman Restart Handler
+
+Usage: podman_restart [scope=system|user] [user=USER] [restart_containers=yes|no]
+
+Description:
+  Restart Podman service and optionally restart running containers.
+  This handler should be triggered after system configuration changes.
+
+Parameters:
+  scope=system|user        Service scope (default: system)
+  user=USER              Username for user scope services
+  restart_containers=yes|no  Restart running containers (default: yes)
+
+Examples:
+  podman_restart scope=system
+  podman_restart scope=user user=vagrant restart_containers=no
+EOF
+            return 0
+            ;;
+        *) echo "❌ Unknown parameter: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+echo "🔧 Podman Restart Handler: Starting..."
+
+# Restart Podman service directly
+echo "🔄 Restarting Podman service..."
+if _banb_command_exists podman; then
+  # Stop any running podman services
+  pkill -f 'podman system service' || true
+
+  # Start new podman service
+  podman system migrate
+  nohup podman system service --time=0 >/dev/null 2>&1 &
+
+  # Verify service is running
+  if pgrep -f 'podman system service' >/dev/null; then
+    echo "✅ Podman service restarted successfully"
+  else
+    echo "⚠️  Podman service may not be running"
+    exit 1
+  fi
+else
+  echo "⚠️  Podman not installed, skipping restart"
+  exit 1
+fi
+
+# Restart containers if requested
+if [[ "$RESTART_CONTAINERS" == "yes" ]]; then
+    echo "🔄 Restarting running containers..."
+
+    # Determine the correct Podman command
+    declare podman_cmd="podman"
+    if [[ "$SCOPE" == "user" && -n "$USER" ]]; then
+        podman_cmd="sudo -u $USER podman"
+    fi
+
+    # Restart all running containers
+    if $podman_cmd ps --format "table {{.Names}}" 2>/dev/null | grep -q .; then
+        $podman_cmd restart --all
+        echo "✅ Containers restarted successfully"
+    else
+        echo "ℹ️ No running containers to restart"
+    fi
+fi
+
+echo "✅ Podman Restart Handler: Completed successfully"

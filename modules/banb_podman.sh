@@ -92,10 +92,10 @@ Examples:
   # Parse common args and set global variables
   _banb_parse_common_args "$@" || return $?
 
-  # Parse module-specific args (Ansible-style key=value)
+  # Parse module-specific args (Ansible-style key=value without -- prefix)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --help) printf "%s\n" "$_help"; return 0 ;;
+      help) printf "%s\n" "$_help"; return 0 ;;
       name=*) name="${1#*=}" ;;
       state=*) state="${1#*=}" ;;
       image=*) image="${1#*=}" ;;
@@ -122,7 +122,7 @@ Examples:
       recreate=*) recreate="${1#*=}" ;;
       pull=*) pull="${1#*=}" ;;
       debug=*) debug="${1#*=}" ;;
-      *) _banb_error "Unknown parameter: $1" 1 ;;
+      *) _banb_error "Invalid parameter format: $1 (should be key=value)"; return 1 ;;
     esac
     shift
   done

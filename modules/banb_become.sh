@@ -1,26 +1,26 @@
 banb_become() {
-  local BECOME=false
+  local BECOME=no
 
   for arg in "$@"; do
     case $arg in
-      --become=*)
+      become=*)
         BECOME="${arg#*=}"
         # Validate boolean value
-        if [[ "$BECOME" != "true" && "$BECOME" != "false" ]]; then
-          echo "Error: --become must be 'true' or 'false'"
+        if [[ "$BECOME" != "yes" && "$BECOME" != "no" ]]; then
+          echo "Error: become must be 'yes' or 'no'"
           return 1
         fi
         ;;
-      --help)
+      help)
         cat <<EOF
 Simulated Ansible 'become' check in Bash
 
 Usage:
-  banb_become --become=true|false
+  banb_become become=yes|no
 
 Options:
-  --become=true     Require root privileges (simulate Ansible become)
-  --become=false    Require non-root execution (simulate unprivileged task)
+  become=yes     Require root privileges (simulate Ansible become)
+  become=no    Require non-root execution (simulate unprivileged task)
 EOF
         return 0
         ;;
@@ -30,18 +30,18 @@ EOF
 
   # Check if become parameter was provided
   if [[ -z "$BECOME" ]]; then
-    echo "Error: --become parameter is required"
-    echo "Usage: banb_become --become=true|false"
+    echo "Error: become parameter is required"
+    echo "Usage: banb_become become=yes|no"
     return 1
   fi
 
-  if [[ "$BECOME" == "true" ]]; then
+  if [[ "$BECOME" == "yes" ]]; then
     if [[ "$EUID" -ne 0 ]]; then
       echo "🚫 This operation requires root privileges."
       echo "👉 Please run the command with sudo privileges"
       return 1
     else
-      echo "✅ Running as root (become=true)"
+      echo "✅ Running as root (become=yes)"
     fi
   else
     if [[ "$EUID" -eq 0 ]]; then
@@ -49,7 +49,7 @@ EOF
       echo "👉 Please switch to a regular user and run: $0"
       return 1
     else
-      echo "✅ Running as non-root (become=false)"
+      echo "✅ Running as non-root (become=no)"
     fi
   fi
 }

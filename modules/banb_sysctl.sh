@@ -4,16 +4,16 @@ banb_sysctl() {
   local BACKUP=false RELOAD=true
 
   local _help="Usage:
-  banb_sysctl --name=KEY --value=VAL [--state=present|absent] [--reload=true|false]
-              [--sysctl-dict=\"KEY1=VAL1 KEY2=VAL2\"] [--dest=PATH]
-              [--backup=true] [--dry-run] [--become]
+  banb_sysctl name=KEY value=VAL [state=present|absent] [reload=true|false]
+              [sysctl-dict=\"KEY1=VAL1 KEY2=VAL2\"] [dest=PATH]
+              [backup=true] [dry-run] [become]
 
 Description:
   Manage kernel parameters via sysctl. Updates a config file safely using a temp copy.
   Default dest is /etc/sysctl.conf, but you can set --dest=/etc/sysctl.d/99-elk.conf.
 
 Examples:
-  banb_sysctl --sysctl-dict=\"vm.swappiness=1 net.core.somaxconn=65535\" --dest=/etc/sysctl.d/99-elk.conf --backup=true --reload=true
+  banb_sysctl sysctl-dict=\"vm.swappiness=1 net.core.somaxconn=65535\" dest=/etc/sysctl.d/99-elk.conf backup=true reload=true
 "
 
   # Parse common args and set global variables
@@ -95,5 +95,7 @@ Examples:
     _banb_success "Reloaded sysctl from $(basename "$DEST")"
   fi
 
-  rm -rf "$tmpdir"
+  if _banb_confirm "delete temporary directory $tmpdir"; then
+    rm -rf "$tmpdir"
+  fi
 }
